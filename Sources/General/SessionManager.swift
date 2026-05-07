@@ -689,62 +689,25 @@ extension SessionManager {
         if self.tasks.isEmpty {
             return
         }
-        // Reconcile cached task states with real URLSession tasks after relaunch.
-        // Cached `.running`/transitional states can become stale and block restart.
-        self.runningTasks.removeAll()
-        self.tasks.forEach { task in
-            switch task.status {
-            case .running, .willSuspend, .willCancel, .willRemove:
-                task.status = .suspended
-            default:
-                break
-            }
+        if configuration.shouldDetermineStatus {
+            determineStatus(fromRunningTask: true)
         }
         session?.getTasksWithCompletionHandler { [weak self] (dataTasks, uploadTasks, downloadTasks) in
             guard let self = self else { return }
-            self.operationQueue.async {
-                var activeTaskURLs = Set<String>()
-                downloadTasks.forEach { downloadTask in
-                    if let originalURL = downloadTask.originalRequest?.url {
-                        activeTaskURLs.insert(originalURL.absoluteString)
-                    }
-                    if let currentURL = downloadTask.currentRequest?.url {
-                        activeTaskURLs.insert(currentURL.absoluteString)
-                    }
-                    guard downloadTask.state == .running,
-                          let currentURL = downloadTask.currentRequest?.url,
-                          let task = self.mapTask(currentURL) else {
-                        return
-                    }
-                    activeTaskURLs.insert(task.url.absoluteString)
-                    activeTaskURLs.insert(task.currentURL.absoluteString)
+            downloadTasks.forEach { downloadTask in
+                if downloadTask.state == .running,
+                    let currentURL = downloadTask.currentRequest?.url,
+                    let task = self.mapTask(currentURL) {
                     self.didStart()
                     self.maintainTasks(with: .appendRunningTasks(task))
                     task.status = .running
                     task.sessionTask = downloadTask
                 }
-                
-                let waitingTasks = self.tasks.filter { task in
-                    let isActive = activeTaskURLs.contains(task.url.absoluteString) ||
-                                   activeTaskURLs.contains(task.currentURL.absoluteString)
-                    guard !isActive else {
-                        return false
-                    }
-                    switch task.status {
-                    case .succeeded, .failed, .removed, .canceled:
-                        return false
-                    default:
-                        task.status = .waiting
-                        return true
-                    }
-                }
-                
-                waitingTasks.forEach { self._start($0) }
-                self.storeTasks()
-                //  处理mananger状态
-                if !self.shouldComplete() {
-                    self.shouldSuspend()
-                }
+            }
+            self.storeTasks()
+            //  处理mananger状态
+            if !self.shouldComplete() {
+                self.shouldSuspend()
             }
         }
     }

@@ -52,6 +52,9 @@ public struct SessionConfiguration {
     // 是否允许蜂窝网络下载
     public var allowsCellularAccess: Bool = false
 
+    public var shouldDetermineStatus: Bool = false
+    
+    
     public init() {
 
     }
